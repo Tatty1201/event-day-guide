@@ -12,6 +12,8 @@ import {
   type Spot, type Notice,
 } from "@/data/data";
 
+type Props = { initialNotices?: Notice[] };
+
 type Sheet = "search" | "results" | "spot" | "notices" | "notice" | "filter" | "survey" | null;
 type LocState = "idle" | "asking" | "loading" | "granted" | "denied";
 
@@ -39,7 +41,8 @@ function matchSpots(q: string): Spot[] {
   });
 }
 
-export default function App() {
+export default function App({ initialNotices }: Props) {
+  const notices = initialNotices ?? NOTICES;
   const mapRef = useRef<FestivalMapHandle>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -62,7 +65,7 @@ export default function App() {
     () => SPOTS.filter((s) => visibleCats.has(s.cat)),
     [visibleCats]
   );
-  const importantNotice = NOTICES.find((n) => n.cat === "important") ?? NOTICES[0];
+  const importantNotice = notices.find((n) => n.cat === "important") ?? notices[0];
 
   useEffect(() => {
     if (sheet === "search") {
@@ -316,7 +319,7 @@ export default function App() {
           ))}
         </div>
         <div className="list-pad notices">
-          {NOTICES.filter((n) => noticeTab === "all" || n.cat === noticeTab).map((n) => (
+          {notices.filter((n) => noticeTab === "all" || n.cat === noticeTab).map((n) => (
             <NoticeCard key={n.id} notice={n} onClick={() => { setActiveNotice(n); setSheet("notice"); }} />
           ))}
           <div className="survey-inline">
