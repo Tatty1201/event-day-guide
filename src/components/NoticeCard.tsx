@@ -4,7 +4,7 @@ import { NOTICE_CATS, type Notice } from "@/data/data";
 type Props = { notice: Notice; onClick: () => void };
 
 export default function NoticeCard({ notice, onClick }: Props) {
-  const nc = NOTICE_CATS[notice.cat];
+  const nc = NOTICE_CATS[notice.cat] ?? NOTICE_CATS.other;
   return (
     <button
       className={"notice-card" + (notice.cat === "important" ? " important" : "")}

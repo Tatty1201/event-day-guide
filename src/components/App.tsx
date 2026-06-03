@@ -7,6 +7,9 @@ import SpotCard from "./SpotCard";
 import NoticeCard from "./NoticeCard";
 import CatDot from "./CatDot";
 import Icon from "./Icon";
+import AdminLogin from "./AdminLogin";
+import AdminPanel from "./AdminPanel";
+import { track } from "@/lib/track";
 import {
   CATEGORIES, SPOTS, NOTICES, NOTICE_CATS, EVENT, catById,
   type Spot, type Notice,
@@ -18,6 +21,7 @@ type Sheet = "search" | "results" | "spot" | "notices" | "notice" | "filter" | "
 type LocState = "idle" | "asking" | "loading" | "granted" | "denied";
 
 const QUICK = ["toilet", "reception", "food", "rest", "firstaid", "stage"];
+const PRIORITY_LINKS = ["toilet", "reception", "firstaid", "hq"];
 const NOTICE_TABS = [
   { id: "all", label: "すべて" },
   { id: "important", label: "重要" },
@@ -45,8 +49,13 @@ export default function App({ initialNotices }: Props) {
   const notices = initialNotices ?? NOTICES;
   const mapRef = useRef<FestivalMapHandle>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const tapCountRef = useRef(0);
+  const tapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [sheet, setSheet] = useState<Sheet>(null);
+  const [adminLoginOpen, setAdminLoginOpen] = useState(false);
+  const [adminPanelOpen, setAdminPanelOpen] = useState(false);
+  const [adminPassword, setAdminPassword] = useState("");
   const [prevSheet, setPrevSheet] = useState<Sheet>(null);
   const [selected, setSelected] = useState<Spot | null>(null);
   const [query, setQuery] = useState("");
@@ -66,6 +75,10 @@ export default function App({ initialNotices }: Props) {
     [visibleCats]
   );
   const importantNotice = notices.find((n) => n.cat === "important") ?? notices[0];
+  const visibleNotices = useMemo(
+    () => notices.filter((n) => noticeTab === "all" || n.cat === noticeTab),
+    [notices, noticeTab]
+  );
 
   useEffect(() => {
     if (sheet === "search") {
@@ -79,9 +92,25 @@ export default function App({ initialNotices }: Props) {
     return () => clearTimeout(t);
   }, [toast]);
 
+  useEffect(() => {
+    track("page_view", { event: EVENT.short });
+  }, []);
+
   const showToast = (msg: string) => setToast(msg);
 
+  const handleChipTap = () => {
+    tapCountRef.current++;
+    if (tapTimerRef.current) clearTimeout(tapTimerRef.current);
+    if (tapCountRef.current >= 5) {
+      tapCountRef.current = 0;
+      setAdminLoginOpen(true);
+    } else {
+      tapTimerRef.current = setTimeout(() => { tapCountRef.current = 0; }, 2000);
+    }
+  };
+
   const openSpot = (spot: Spot, from?: Sheet) => {
+    track("spot_open", { spotId: spot.id, category: spot.cat, from: from ?? sheet ?? "map" });
     setSelected(spot);
     setPrevSheet(from ?? null);
     setSheet("spot");
@@ -89,7 +118,9 @@ export default function App({ initialNotices }: Props) {
   };
 
   const runSearch = (q: string, label?: string) => {
-    setResults(matchSpots(q));
+    const matched = matchSpots(q);
+    track("search_submit", { query: q.trim(), results: matched.length });
+    setResults(matched);
     setResultLabel(label ?? `「${q}」`);
     setQuery(q);
     setSheet("results");
@@ -97,13 +128,16 @@ export default function App({ initialNotices }: Props) {
 
   const quickSearch = (catId: string) => {
     const cat = catById(catId);
-    setResults(SPOTS.filter((s) => s.cat === catId));
+    const matched = SPOTS.filter((s) => s.cat === catId);
+    track("quick_category", { category: catId, results: matched.length });
+    setResults(matched);
     setResultLabel(cat.label);
     setQuery(cat.label);
     setSheet("results");
   };
 
   const requestLocation = () => {
+    track("location_request", { state: locState });
     if (locState === "granted" && userLoc) {
       mapRef.current?.flyTo(userLoc.x, userLoc.y);
       showToast("現在地はおおよその位置です");
@@ -113,6 +147,7 @@ export default function App({ initialNotices }: Props) {
   };
 
   const grantLocation = () => {
+    track("location_grant");
     setLocState("loading");
     setTimeout(() => {
       const loc = { x: 520, y: 1080, acc: 95 };
@@ -124,11 +159,13 @@ export default function App({ initialNotices }: Props) {
   };
 
   const denyLocation = () => {
+    track("location_deny");
     setLocState("denied");
     showToast("位置情報なしでも、検索とカテゴリから探せます");
   };
 
   const toggleCat = (id: string) => {
+    track("category_toggle", { category: id, visible: !visibleCats.has(id) });
     setVisibleCats((prev) => {
       const n = new Set(prev);
       n.has(id) ? n.delete(id) : n.add(id);
@@ -136,7 +173,11 @@ export default function App({ initialNotices }: Props) {
     });
   };
 
-  const closeSheet = () => { setSheet(null); setSelected(null); };
+  const closeSheet = () => {
+    track("sheet_close", { sheet: sheet ?? "none" });
+    setSheet(null);
+    setSelected(null);
+  };
 
   return (
     <div className="app">
@@ -146,28 +187,41 @@ export default function App({ initialNotices }: Props) {
         spots={visibleSpots}
         selectedId={selected?.id ?? null}
         onSelect={(s) => openSpot(s)}
-        onMapTap={() => { if (sheet === "spot") closeSheet(); }}
+        onMapTap={() => { if (sheet) closeSheet(); }}
         userLocation={userLoc}
       />
 
       {/* TOP CHROME */}
-      {sheet !== "search" && (
+      {!sheet && (
         <div className="top-chrome">
-          <div className="event-chip">
+          <div className="event-chip" onClick={handleChipTap}>
             <span className="event-mark" />
             <span>{EVENT.short}</span>
             <span className="event-date">10:00–16:00</span>
           </div>
-          <button className="announce" onClick={() => { setNoticeTab("all"); setSheet("notices"); }}>
+          <button className="announce" onClick={() => { track("notice_banner_open"); setNoticeTab("all"); setSheet("notices"); }}>
             <span className="announce-badge"><Icon name="warning" size={14} stroke={2.6} /></span>
             <span className="announce-label">重要</span>
             <span className="announce-text">{importantNotice.title}</span>
             <Icon name="chevronRight" size={18} className="announce-arrow" />
           </button>
-          <button className="search-pill" onClick={() => setSheet("search")}>
+          <button className="search-pill" onClick={() => { track("search_open"); setSheet("search"); }}>
             <Icon name="search" size={20} className="muted" />
             <span>トイレ・受付・ブースを探す</span>
           </button>
+          <div className="priority-links" aria-label="よく使う案内">
+            {PRIORITY_LINKS.map((id) => {
+              const c = catById(id);
+              return (
+                <button key={id} className="priority-link" onClick={() => quickSearch(id)}>
+                  <span className="priority-ic" style={{ color: c.color }}>
+                    <Icon name={c.icon} size={18} stroke={2.3} />
+                  </span>
+                  <span>{c.label}</span>
+                </button>
+              );
+            })}
+          </div>
         </div>
       )}
 
@@ -313,21 +367,28 @@ export default function App({ initialNotices }: Props) {
         <SheetHead title="お知らせ" sub="当日の最新情報" onClose={closeSheet} />
         <div className="tab-row">
           {NOTICE_TABS.map((t) => (
-            <button key={t.id} className={"tab" + (noticeTab === t.id ? " active" : "")} onClick={() => setNoticeTab(t.id)}>
+            <button key={t.id} className={"tab" + (noticeTab === t.id ? " active" : "")} onClick={() => { track("notice_tab", { tab: t.id }); setNoticeTab(t.id); }}>
               {t.label}
             </button>
           ))}
         </div>
         <div className="list-pad notices">
-          {notices.filter((n) => noticeTab === "all" || n.cat === noticeTab).map((n) => (
-            <NoticeCard key={n.id} notice={n} onClick={() => { setActiveNotice(n); setSheet("notice"); }} />
-          ))}
+          {visibleNotices.length ? (
+            visibleNotices.map((n) => (
+              <NoticeCard key={n.id} notice={n} onClick={() => { track("notice_open", { noticeId: n.id, category: n.cat }); setActiveNotice(n); setSheet("notice"); }} />
+            ))
+          ) : (
+            <div className="empty compact">
+              <p className="empty-title">該当するお知らせはありません</p>
+              <p className="empty-sub">最新情報は重要欄と場内アナウンスで確認できます。</p>
+            </div>
+          )}
           <div className="survey-inline">
             <div className="survey-inline-text">
               <strong>ご来場アンケート</strong>
               <span>3分で回答・次回の改善に役立てます</span>
             </div>
-            <button className="btn primary sm" onClick={() => setSheet("survey")}>
+            <button className="btn primary sm" onClick={() => { track("survey_prompt_open"); setSheet("survey"); }}>
               <Icon name="external" size={16} />回答する
             </button>
           </div>
@@ -336,7 +397,7 @@ export default function App({ initialNotices }: Props) {
 
       <BottomSheet open={sheet === "notice"} onClose={closeSheet} snaps={[0.5, 0.82]}>
         {activeNotice && (() => {
-          const nc = NOTICE_CATS[activeNotice.cat];
+          const nc = NOTICE_CATS[activeNotice.cat] ?? NOTICE_CATS.other;
           return (
             <div className="notice-detail">
               <SheetHead
@@ -352,7 +413,7 @@ export default function App({ initialNotices }: Props) {
                 <div className="spot-actions">
                   <button className="btn ghost" onClick={() => {
                     const sp = SPOTS.find((s) => s.id === "lost");
-                    if (sp) openSpot(sp);
+                    if (sp) openSpot(sp, "notice");
                   }}>
                     <Icon name="pin" size={18} />落とし物センターを地図で見る
                   </button>
@@ -399,7 +460,7 @@ export default function App({ initialNotices }: Props) {
           <div className="survey-illu"><Icon name="clipboard" size={34} stroke={1.8} /></div>
           <h2>ご来場アンケート</h2>
           <p>会場の感想や気になった点をお聞かせください。所要約3分。回答はGoogleフォームで受け付けます。</p>
-          <button className="btn primary lg" onClick={() => { window.open(EVENT.surveyUrl, "_blank"); closeSheet(); }}>
+          <button className="btn primary lg" onClick={() => { track("survey_external_open"); window.open(EVENT.surveyUrl, "_blank"); closeSheet(); }}>
             <Icon name="external" size={18} />アンケートを開く
           </button>
           <button className="btn text" onClick={closeSheet}>あとで</button>
@@ -424,23 +485,41 @@ export default function App({ initialNotices }: Props) {
       <nav className="bottom-nav">
         <button
           className={"nav-btn" + (sheet === "notices" || sheet === "notice" ? " active" : "")}
-          onClick={() => { setNoticeTab("all"); setSheet("notices"); }}
+          onClick={() => { track("nav_open", { target: "notices" }); setNoticeTab("all"); setSheet("notices"); }}
         >
           <span className="nav-ic"><Icon name="bell" size={23} /><span className="nav-dot" /></span>
           <span>お知らせ</span>
         </button>
-        <button className={"nav-btn" + (sheet === "filter" ? " active" : "")} onClick={() => setSheet("filter")}>
+        <button className={"nav-btn" + (sheet === "filter" ? " active" : "")} onClick={() => { track("nav_open", { target: "filter" }); setSheet("filter"); }}>
           <Icon name="layers" size={23} /><span>カテゴリ</span>
         </button>
         <button className={"nav-btn" + (locState === "granted" ? " active" : "")} onClick={requestLocation}>
           <Icon name="locate" size={23} /><span>現在地</span>
         </button>
-        <button className="nav-btn survey" onClick={() => setSheet("survey")}>
+        <button className="nav-btn survey" onClick={() => { track("nav_open", { target: "survey" }); setSheet("survey"); }}>
           <Icon name="clipboard" size={23} /><span>アンケート</span>
         </button>
       </nav>
 
       {toast && <div className="toast">{toast}</div>}
+
+      {adminLoginOpen && (
+        <AdminLogin
+          onLogin={(pw) => {
+            setAdminPassword(pw);
+            setAdminLoginOpen(false);
+            setAdminPanelOpen(true);
+          }}
+          onClose={() => setAdminLoginOpen(false)}
+        />
+      )}
+
+      {adminPanelOpen && (
+        <AdminPanel
+          adminPassword={adminPassword}
+          onClose={() => setAdminPanelOpen(false)}
+        />
+      )}
     </div>
   );
 }

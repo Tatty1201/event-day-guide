@@ -71,15 +71,23 @@ export default function BottomSheet({
   };
 
   const sheetH = maxSnap * H;
+  const closeFromBackdrop = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.target === layerRef.current) onClose?.();
+  };
 
   return (
-    <div ref={layerRef} className={"sheet-layer" + (open ? " open" : "")}>
+    <div
+      ref={layerRef}
+      className={"sheet-layer" + (open ? " open" : "")}
+      onPointerDown={closeFromBackdrop}
+    >
       {dimEnabled && (
         <div className="sheet-dim" style={{ opacity: open ? 1 : 0 }} onClick={onClose} />
       )}
       <div
         className={"bottom-sheet" + (anim ? " anim" : "")}
         style={{ height: sheetH, transform: `translateY(${ty}px)` }}
+        onPointerDown={(e) => e.stopPropagation()}
       >
         <div
           className="sheet-grab"
